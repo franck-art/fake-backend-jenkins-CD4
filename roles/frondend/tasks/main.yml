@@ -1,0 +1,90 @@
+---
+
+# Deploiement de l'appli web battleboat (battlegame) FRONDEND
+
+- name: create project directory
+  file:
+    path: "{{ home }}/mini_projet"
+    state: directory
+  tags:
+    - build
+    - preprod
+    - prod
+
+- name: copy devops private key file
+  copy:
+    content: "{{ github_private_key }}"
+    dest: "{{ home }}/.ssh/id_rsa"
+    owner: centos
+
+  tags:
+    - build
+    - preprod
+    - prod
+
+- name: load the source code in github
+  git:
+    repo: "{{ repo_fake_backend  }}"
+    dest: "{{ home }}/mini_projet"
+    accept_hostkey: yes
+    force: yes
+    recursive: no
+    key_file: "{{ home }}/.ssh/id_rsa"
+    version: "{{ branch_clone }}"
+  tags:
+    - build
+    - preprod
+    - prod
+
+- name: Log into DockerHub
+  docker_login:
+    username: "{{ dockerhub_login_vault }}"
+    password: "{{ dockerhub_pwd_vault }}"
+  tags:
+    - build
+    - prod
+
+- name: Build api image and push it to Docker Hub
+  docker_image:
+    path: "{{ home }}/mini_projet/fake-backend"
+    name: "{{ dockerhub_login_vault }}/fake-backend-jenkins_cd"
+    push: yes
+    tag: "{{ tag_version }}"
+  tags:
+    - build
+
+- name: pull an image
+  docker_image:
+    name: "{{ dockerhub_login_vault }}/fake-backend-jenkins_cd:{{ tag_version }}"
+    source: pull
+  tags:
+    - prod
+
+- name: container battlegame
+  docker_container:
+    name: battlegame
+    image: "{{ dockerhub_login_vault }}/fake-backend-jenkins_cd:{{ tag_version }}"
+    state: started
+
+    ports:
+      - "80:3000"
+    env:
+      DATABASE_HOST: "dbgame"
+      DATABASE_PORT: "3306"
+      DATABASE_USER: "battleuser"
+      DATABASE_PASSWORD: "battlepass"
+      DATABASE_NAME: "battleboat"
+
+    volumes:
+        - "{{ home }}/mini_projet/battleboat:/etc/backend/static"
+    networks:
+      - name: network_game
+  tags:
+    - preprod
+    - prod
+
+- name: Check that you can connect (GET) to a page and it returns a status 200
+  uri:
+    url: http://172.18.0.1:80
+  tags:
+    - test
